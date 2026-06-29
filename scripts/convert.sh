@@ -11,13 +11,17 @@
 #
 # Tools:
 #   antigravity  — Antigravity skill files (~/.gemini/antigravity/skills/)
-#   gemini-cli   — Gemini CLI extension (skills/ + gemini-extension.json)
-#   opencode     — OpenCode agent files (.opencode/agent/*.md)
+#   gemini-cli   — Gemini CLI subagent files (~/.gemini/agents/*.md)
+#   opencode     — OpenCode agent files (.opencode/agents/*.md)
 #   cursor       — Cursor rule files (.cursor/rules/*.mdc)
 #   aider        — Single CONVENTIONS.md for Aider
 #   windsurf     — Single .windsurfrules for Windsurf
-#   openclaw     — OpenClaw SOUL.md files (openclaw_workspace/<agent>/SOUL.md)
+#   openclaw     — OpenClaw workspaces (integrations/openclaw/<agent>/SOUL.md)
 #   qwen         — Qwen Code SubAgent files (~/.qwen/agents/*.md)
+#   kimi         — Kimi Code CLI agent files (~/.config/kimi/agents/)
+#   codex        — Codex custom agent TOML files (~/.codex/agents/*.toml)
+#   osaurus      — Osaurus skill files (~/.osaurus/skills/<name>/SKILL.md)
+#   hermes       — Hermes lazy-router plugin (one plugin + on-disk agent index)
 #   all          — All tools (default)
 #
 # Output is written to integrations/<tool>/ relative to the repo root.
@@ -60,14 +64,24 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUT_DIR="$REPO_ROOT/integrations"
 TODAY="$(date +%Y-%m-%d)"
 
+# Static date stamped into Antigravity skill frontmatter. Deliberately fixed (NOT
+# the convert-run date): a per-run TODAY made every regeneration produce different
+# bytes, which churns the gitignored output and breaks byte-reproducible rendering
+# downstream. Matches the documented example in integrations/antigravity/README.md.
+ANTIGRAVITY_DATE_ADDED="2026-03-08"
+
+# Shared helpers (get_field, get_body, slugify, ...)
+# shellcheck source=lib.sh
+. "$SCRIPT_DIR/lib.sh"
+
 AGENT_DIRS=(
-  academic design engineering game-development marketing paid-media sales product project-management
-  testing support spatial-computing specialized
+  academic design engineering finance game-development gis marketing paid-media product project-management
+  sales security spatial-computing specialized support testing
 )
 
 # --- Usage ---
 usage() {
-  sed -n '3,26p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,27p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 }
 
@@ -79,28 +93,21 @@ parallel_jobs_default() {
   echo 4
 }
 
-# --- Frontmatter helpers ---
+# --- Frontmatter helpers: get_field / get_body / slugify now live in lib.sh ---
 
-# Extract a single field value from YAML frontmatter block.
-# Usage: get_field <field> <file>
-get_field() {
-  local field="$1" file="$2"
-  awk -v f="$field" '
-    /^---$/ { fm++; next }
-    fm == 1 && $0 ~ "^" f ": " { sub("^" f ": ", ""); print; exit }
-  ' "$file"
-}
-
-# Strip the leading frontmatter block and return only the body.
-# Usage: get_body <file>
-get_body() {
-  awk 'BEGIN{fm=0} /^---$/{fm++; next} fm>=2{print}' "$1"
-}
-
-# Convert a human-readable agent name to a lowercase kebab-case slug.
-# "Frontend Developer" → "frontend-developer"
-slugify() {
-  echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//'
+# Escape a value for a TOML basic string, including control characters that
+# cannot appear raw in TOML source.
+toml_escape_string() {
+  printf '%s' "$1" | perl -0pe '
+    s/\\/\\\\/g;
+    s/"/\\"/g;
+    s/\n/\\n/g;
+    s/\r/\\r/g;
+    s/\t/\\t/g;
+    s/\f/\\f/g;
+    s/\x08/\\b/g;
+    s/([\x00-\x07\x0B\x0E-\x1F\x7F])/sprintf("\\u%04X", ord($1))/ge;
+  '
 }
 
 # --- Per-tool converters ---
@@ -125,9 +132,58 @@ name: ${slug}
 description: ${description}
 risk: low
 source: community
-date_added: '${TODAY}'
+date_added: '${ANTIGRAVITY_DATE_ADDED}'
 ---
 ${body}
+HEREDOC
+}
+
+convert_osaurus() {
+  local file="$1"
+  local name description slug outdir outfile body
+
+  name="$(get_field "name" "$file")"
+  description="$(get_field "description" "$file")"
+  slug="agency-$(slugify "$name")"
+  body="$(get_body "$file")"
+
+  # Stage one dir per skill (install.sh copies into ~/.osaurus/skills/<name>/).
+  outdir="$OUT_DIR/osaurus/$slug"
+  outfile="$outdir/SKILL.md"
+  mkdir -p "$outdir"
+
+  # Osaurus skill format: the Anthropic "Agent Skills" SKILL.md — a directory
+  # named for the skill containing a SKILL.md with name + description frontmatter
+  # and the persona as the instruction body. Installs into ~/.osaurus/skills/.
+  # Kept to the standard fields so it stays compatible with any Agent-Skills host.
+  cat > "$outfile" <<HEREDOC
+---
+name: ${slug}
+description: ${description}
+---
+${body}
+HEREDOC
+}
+
+convert_codex() {
+  local file="$1"
+  local name description slug outfile body
+
+  name="$(get_field "name" "$file")"
+  description="$(get_field "description" "$file")"
+  slug="$(slugify "$name")"
+  body="$(get_body "$file")"
+
+  outfile="$OUT_DIR/codex/agents/${slug}.toml"
+  mkdir -p "$(dirname "$outfile")"
+
+  # Codex custom agent format: one TOML file per agent with minimal required
+  # fields only. Use a TOML basic string so control characters in the source
+  # body are encoded safely instead of producing invalid TOML.
+  cat > "$outfile" <<HEREDOC
+name = "$(toml_escape_string "$name")"
+description = "$(toml_escape_string "$description")"
+developer_instructions = "$(toml_escape_string "$body")"
 HEREDOC
 }
 
@@ -140,11 +196,11 @@ convert_gemini_cli() {
   slug="$(slugify "$name")"
   body="$(get_body "$file")"
 
-  outdir="$OUT_DIR/gemini-cli/skills/$slug"
-  outfile="$outdir/SKILL.md"
+  # Gemini CLI subagent format: .md file in ~/.gemini/agents/
+  outdir="$OUT_DIR/gemini-cli/agents"
+  outfile="$outdir/${slug}.md"
   mkdir -p "$outdir"
 
-  # Gemini CLI skill format: minimal frontmatter (name + description only)
   cat > "$outfile" <<HEREDOC
 ---
 name: ${slug}
@@ -263,8 +319,8 @@ convert_openclaw() {
   # Split body sections into SOUL.md (persona) vs AGENTS.md (operations)
   # by matching ## header keywords. Unmatched sections go to AGENTS.md.
   #
-  # SOUL keywords: identity, memory (paired with identity), communication,
-  #   style, critical rules, rules you must follow
+  # SOUL keywords: identity, learning & memory, communication, style,
+  #   critical rules, rules you must follow
   # AGENTS keywords: everything else (mission, deliverables, workflow, etc.)
 
   local current_target="agents"  # default bucket
@@ -288,6 +344,7 @@ convert_openclaw() {
       header_lower="$(echo "$line" | tr '[:upper:]' '[:lower:]')"
 
       if [[ "$header_lower" =~ identity ]] ||
+         [[ "$header_lower" =~ learning.*memory ]] ||
          [[ "$header_lower" =~ communication ]] ||
          [[ "$header_lower" =~ style ]] ||
          [[ "$header_lower" =~ critical.rule ]] ||
@@ -373,6 +430,39 @@ HEREDOC
   fi
 }
 
+convert_kimi() {
+  local file="$1"
+  local name description slug outdir agent_file body
+
+  name="$(get_field "name" "$file")"
+  description="$(get_field "description" "$file")"
+  slug="$(slugify "$name")"
+  body="$(get_body "$file")"
+
+  outdir="$OUT_DIR/kimi/$slug"
+  agent_file="$outdir/agent.yaml"
+  mkdir -p "$outdir"
+
+  # Kimi Code CLI agent format: YAML with separate system prompt file
+  # Uses extend: default to inherit Kimi's default toolset
+  cat > "$agent_file" <<HEREDOC
+version: 1
+agent:
+  name: ${slug}
+  extend: default
+  system_prompt_path: ./system.md
+HEREDOC
+
+  # Write system prompt to separate file
+  cat > "$outdir/system.md" <<HEREDOC
+# ${name}
+
+${description}
+
+${body}
+HEREDOC
+}
+
 # Aider and Windsurf are single-file formats — accumulate into temp files
 # then write at the end.
 AIDER_TMP="$(mktemp)"
@@ -445,9 +535,27 @@ HEREDOC
 
 # --- Main loop ---
 
+# Remove a tool's previously-generated output before regenerating, so renamed or
+# deleted agents don't leave orphan files behind (convert.sh overwrites in place
+# but never pruned stale output). Preserves the committed README.md — the only
+# tracked file under integrations/<tool>/ for conversion targets.
+clean_tool_output() {
+  local dir="$OUT_DIR/$1"
+  [[ -d "$dir" ]] || return 0
+  find "$dir" -mindepth 1 -maxdepth 1 ! -name 'README.md' -exec rm -rf {} +
+}
+
 run_conversions() {
   local tool="$1"
   local count=0
+
+  if [[ "$tool" == "hermes" ]]; then
+    clean_tool_output "$tool"
+    python3 "$SCRIPT_DIR/build-hermes-plugin.py" --repo-root "$REPO_ROOT" --out "$OUT_DIR/hermes"
+    return
+  fi
+
+  clean_tool_output "$tool"
 
   for dir in "${AGENT_DIRS[@]}"; do
     local dirpath="$REPO_ROOT/$dir"
@@ -465,11 +573,14 @@ run_conversions() {
 
       case "$tool" in
         antigravity) convert_antigravity "$file" ;;
+        codex)       convert_codex       "$file" ;;
         gemini-cli)  convert_gemini_cli  "$file" ;;
         opencode)    convert_opencode    "$file" ;;
         cursor)      convert_cursor      "$file" ;;
         openclaw)    convert_openclaw    "$file" ;;
         qwen)        convert_qwen        "$file" ;;
+        kimi)        convert_kimi        "$file" ;;
+        osaurus)     convert_osaurus     "$file" ;;
         aider)       accumulate_aider    "$file" ;;
         windsurf)    accumulate_windsurf "$file" ;;
       esac
@@ -500,7 +611,7 @@ main() {
     esac
   done
 
-  local valid_tools=("antigravity" "gemini-cli" "opencode" "cursor" "aider" "windsurf" "openclaw" "qwen" "all")
+  local valid_tools=("antigravity" "gemini-cli" "opencode" "cursor" "aider" "windsurf" "openclaw" "qwen" "kimi" "codex" "osaurus" "hermes" "all")
   local valid=false
   for t in "${valid_tools[@]}"; do [[ "$t" == "$tool" ]] && valid=true && break; done
   if ! $valid; then
@@ -519,7 +630,7 @@ main() {
 
   local tools_to_run=()
   if [[ "$tool" == "all" ]]; then
-    tools_to_run=("antigravity" "gemini-cli" "opencode" "cursor" "aider" "windsurf" "openclaw" "qwen")
+    tools_to_run=("antigravity" "gemini-cli" "opencode" "cursor" "aider" "windsurf" "openclaw" "qwen" "kimi" "codex" "osaurus" "hermes")
   else
     tools_to_run=("$tool")
   fi
@@ -530,7 +641,7 @@ main() {
 
   if $use_parallel && [[ "$tool" == "all" ]]; then
     # Tools that write to separate dirs can run in parallel; buffer output so each tool's output stays together
-    local parallel_tools=(antigravity gemini-cli opencode cursor openclaw qwen)
+    local parallel_tools=(antigravity gemini-cli opencode cursor openclaw qwen codex osaurus hermes)
     local parallel_out_dir
     parallel_out_dir="$(mktemp -d)"
     info "Converting: ${#parallel_tools[@]}/${n_tools} tools in parallel (output buffered per tool)..."
@@ -542,7 +653,7 @@ main() {
       [[ -f "$parallel_out_dir/$t" ]] && cat "$parallel_out_dir/$t"
     done
     rm -rf "$parallel_out_dir"
-    local idx=7
+    local idx=8
     for t in aider windsurf; do
       progress_bar "$idx" "$n_tools"
       printf "\n"
@@ -563,19 +674,6 @@ main() {
       local count
       count="$(run_conversions "$t")"
       total=$(( total + count ))
-
-      # Gemini CLI also needs the extension manifest (written by this process when --tool gemini-cli)
-      if [[ "$t" == "gemini-cli" ]]; then
-        mkdir -p "$OUT_DIR/gemini-cli"
-        cat > "$OUT_DIR/gemini-cli/gemini-extension.json" <<'HEREDOC'
-{
-  "name": "agency-agents",
-  "version": "1.0.0"
-}
-HEREDOC
-        info "Wrote gemini-extension.json"
-      fi
-
       info "Converted $count agents for $t"
     done
   fi

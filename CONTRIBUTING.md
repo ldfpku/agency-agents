@@ -31,18 +31,34 @@ This project and everyone participating in it is governed by our Code of Conduct
 Have an idea for a specialized agent? Great! Here's how to add one:
 
 1. **Fork the repository**
-2. **Choose the appropriate category** (or propose a new one):
-   - `engineering/` - Software development specialists
+2. **Choose the appropriate division** (one of the 16 — or propose a new one):
+   - `academic/` - Research, scholarship, and domain-expert specialists
    - `design/` - UX/UI and creative specialists
+   - `engineering/` - Software development specialists
+   - `finance/` - Financial planning, accounting, and investment specialists
    - `game-development/` - Game design and development specialists
+   - `gis/` - Geospatial, mapping, and spatial-analysis specialists
    - `marketing/` - Growth and marketing specialists
    - `paid-media/` - Paid acquisition and media specialists
    - `product/` - Product management specialists
    - `project-management/` - PM and coordination specialists
-   - `testing/` - QA and testing specialists
-   - `support/` - Operations and support specialists
+   - `sales/` - Sales, revenue, and deal specialists
+   - `security/` - Security architecture, AppSec, pentest, threat intel, and incident response
    - `spatial-computing/` - AR/VR/XR specialists
    - `specialized/` - Unique specialists that don't fit elsewhere
+   - `support/` - Operations and support specialists
+   - `testing/` - QA and testing specialists
+
+   > **Divisions are defined by `divisions.json`** (repo root) — the single source of
+   > truth for the division set, validated in CI by `scripts/check-divisions.sh`.
+   > **Proposing a new division** means: create the directory, add an entry to
+   > `divisions.json` (label/icon/color), and add it to `AGENT_DIRS` in both
+   > `scripts/convert.sh` and `scripts/lint-agents.sh`. The check fails the build
+   > unless all of these agree and the directory contains at least one agent file.
+   >
+   > Note: `strategy/` (NEXUS playbooks/runbooks — no agent frontmatter) and
+   > `integrations/` (generated per-tool output from `convert.sh`) are **not**
+   > divisions and must never be added to the division lists.
 
 3. **Create your agent file** following the template below
 4. **Test your agent** in real scenarios
@@ -220,6 +236,8 @@ quickstart guide wearing an agent costume does not.
 
 **Qwen Code Compatibility**: Agent bodies support `${variable}` templating for dynamic context (e.g., `${project_name}`, `${task_description}`). Qwen SubAgents use minimal frontmatter: only `name` and `description` are required; `color`, `emoji`, and `version` fields are omitted as Qwen doesn't use them.
 
+**Codex Compatibility**: Codex custom agents are generated as standalone TOML files. The Codex integration keeps a minimal 1:1 mapping: `name` and `description` are copied from frontmatter, and the Markdown body becomes `developer_instructions`. Source-only metadata such as `color`, `emoji`, `vibe`, and other unsupported frontmatter fields are omitted.
+
 ### What Makes a Great Agent?
 
 **Great agents have**:
@@ -263,6 +281,7 @@ We love ambitious ideas — a [Discussion](https://github.com/msitarzewski/agenc
 #### Things we'll always close
 - **Committed build output**: Generated files (`_site/`, compiled assets, converted agent files) should never be checked in. Users run `convert.sh` locally; all output is gitignored.
 - **PRs that bulk-modify existing agents** without a prior discussion — even well-intentioned reformatting can create merge conflicts for other contributors.
+- **Near-duplicate "re-skins"**: New agents that are find-replace copies of an existing one (e.g. swapping a country or platform name) rather than genuinely new specialists. Run `scripts/check-agent-originality.sh` before submitting — CI runs it automatically.
 
 ### Before Submitting
 
@@ -271,6 +290,7 @@ We love ambitious ideas — a [Discussion](https://github.com/msitarzewski/agenc
 3. **Add Examples**: Include at least 2-3 code/template examples
 4. **Define Metrics**: Include specific, measurable success criteria
 5. **Proofread**: Check for typos, formatting issues, clarity
+6. **Check it's original**: Run `./scripts/check-agent-originality.sh path/to/your-agent.md`. It compares your agent against the whole roster and flags near-duplicates (a swapped country/platform name won't fool it). A new agent should be genuinely new — if you're localizing for a market, make the platforms, tactics, and examples actually different, not a find-replace.
 
 ### Submitting Your PR
 
@@ -307,6 +327,7 @@ We love ambitious ideas — a [Discussion](https://github.com/msitarzewski/agenc
 [How have you tested this agent? Real-world use cases?]
 
 ## Checklist
+- [ ] Original — not a near-duplicate (ran `scripts/check-agent-originality.sh`)
 - [ ] Follows agent template structure
 - [ ] Includes personality and voice
 - [ ] Has concrete code/template examples
