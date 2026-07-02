@@ -10,7 +10,7 @@
 #   ./scripts/convert.sh [--tool <name>] [--out <dir>] [--parallel] [--jobs N] [--help]
 #
 # Tools:
-#   antigravity  — Antigravity skill files (~/.gemini/antigravity/skills/)
+#   antigravity  — Antigravity skill files (~/.gemini/config/skills/)
 #   gemini-cli   — Gemini CLI subagent files (~/.gemini/agents/*.md)
 #   opencode     — OpenCode agent files (.opencode/agents/*.md)
 #   cursor       — Cursor rule files (.cursor/rules/*.mdc)
@@ -63,12 +63,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUT_DIR="$REPO_ROOT/integrations"
 TODAY="$(date +%Y-%m-%d)"
-
-# Static date stamped into Antigravity skill frontmatter. Deliberately fixed (NOT
-# the convert-run date): a per-run TODAY made every regeneration produce different
-# bytes, which churns the gitignored output and breaks byte-reproducible rendering
-# downstream. Matches the documented example in integrations/antigravity/README.md.
-ANTIGRAVITY_DATE_ADDED="2026-03-08"
 
 # Shared helpers (get_field, get_body, slugify, ...)
 # shellcheck source=lib.sh
@@ -125,14 +119,14 @@ convert_antigravity() {
   outfile="$outdir/SKILL.md"
   mkdir -p "$outdir"
 
-  # Antigravity SKILL.md format mirrors community skills in ~/.gemini/antigravity/skills/
+  # Antigravity Agent-Skills SKILL.md — name + description frontmatter and the
+  # persona as the body, installed into ~/.gemini/config/skills/ (global) or
+  # <project>/.agents/skills/ (project). Standard fields only, so it stays a
+  # valid Agent-Skills skill for any host (and deterministic — no date stamp).
   cat > "$outfile" <<HEREDOC
 ---
 name: ${slug}
 description: ${description}
-risk: low
-source: community
-date_added: '${ANTIGRAVITY_DATE_ADDED}'
 ---
 ${body}
 HEREDOC
